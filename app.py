@@ -148,20 +148,39 @@ with st.sidebar:
             su_pwd       = st.text_input("Password", type="password", key="su_pwd")
         
             if st.button("Create account", key="btn_signup"):
-                # 非ASCIIを徹底排除 → 形式チェック
-                su_email = sanitize_ascii_email(su_email_raw)
+                # ここで正規化＆チェック（encodeは使わない）
+                su_email = normalize_email(su_email_raw)
         
-                # デバッグ確認したい時は一時的に表示
-                # st.caption(f"DEBUG raw: {repr(su_email_raw)}  -> send: {repr(su_email)}")
+                if not su_email.isascii():
+                    st.error("メールアドレスに全角文字が含まれています。半角で入力してください。")
+                    st.stop()
         
                 if not EMAIL_RE.fullmatch(su_email):
                     st.error("メールアドレスの形式が正しくありません（例: name@example.com）。")
                     st.stop()
         
                 try:
-                    res = supabase.auth.sign_up({"email": su_email, "password": su_pwd})
+                    # ← これが「res」。sign_upの戻り値を受け取る
+                    res = supabase.auth.sign_up({
+                        "email": su_email,
+                        "password": su_pwd,
+                        "options": {
+                            "email_redirect_to": "https://gym-memo-ijyyucjaqtmcgrsncrjyyl.streamlit.app/"
+                        }
+                    })
+        
                     if res.user:
-                        st.success("アカウント作成に成功。Confirm email がONならメールのリンクを開いてください。")
+                        st.success("アカウント作成に成功。Confirm email がONなら届いたメールのリンクを開いてください。")
+                    else:
+                        st.info("メール確認が必要な設定の場合、リンクを開くまでログインは完了しません。")
+        
+                    # （任意）メール確認をOFFにしている場合は自動ログインできる
+                    if getattr(res, "session", None):
+                        st.session_state["user"] = res.user
+                        st.session_state["access_token"] = res.session.access_token
+                        supabase.postgrest.auth(res.session.access_token)
+                        st.rerun()
+        
                 except Exception as e:
                     st.error(f"サインアップ失敗: {getattr(e, 'message', repr(e))}")
 
@@ -686,6 +705,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
