@@ -95,44 +95,38 @@ def y_domain(series, pad_ratio=0.05):
     pad = span * pad_ratio
     return [lo - pad, hi + pad]
 
-def _normalize_sets_df(df):
+
+
+def normalize_sets_df(df: pd.DataFrame) -> pd.DataFrame:
     import pandas as pd
-    # DataFrame化（None / list / dict 何でも受ける）
-    if isinstance(df, pd.DataFrame):
-        out = df.copy()
-    else:
-        try:
-            out = pd.DataFrame(df)
-        except Exception:
-            out = pd.DataFrame()
+
+    df = pd.DataFrame(df).copy() if not isinstance(df, pd.DataFrame) else df.copy()
 
     # 空でも必要カラムを用意
-    if out.empty:
+    if df.empty:
         return pd.DataFrame(
-            columns=["id", "workout_id", "exercise", "weight", "reps", "is_pr", "date"]
+            columns=["id","workout_id","exercise","weight","reps","is_pr","date"]
         )
 
-    # 別名 → 想定名へ寄せる
-    rename = {}
-    if "name" in out.columns and "exercise" not in out.columns:
-        rename["name"] = "exercise"
-    for cand in ("date", "created_at", "performed_at", "timestamp"):
-        if cand in out.columns and "date" not in out.columns:
-            rename[cand] = "date"
+    # 別名 → 想定名へ
+    ren = {}
+    if "name" in df.columns and "exercise" not in df.columns:
+        ren["name"] = "exercise"
+    for c in ("date", "created_at", "performed_at", "timestamp"):
+        if c in df.columns and "date" not in df.columns:
+            ren[c] = "date"
             break
-    if rename:
-        out = out.rename(columns=rename)
+    if ren:
+        df = df.rename(columns=ren)
 
-    # ない列は空で作る
-    for col in ("exercise", "date"):
-        if col not in out.columns:
-            out[col] = pd.NA
+    # 無い列は空で補完
+    for c in ("id","workout_id","exercise","weight","reps","is_pr","date"):
+        if c not in df.columns:
+            df[c] = pd.NA
 
-    # 日付をdatetimeに
-    out["date"] = pd.to_datetime(out["date"], errors="coerce")
-
-    return out
-
+    # 日付をdatetimeへ
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    return df
 
 # ========== Supabase Client ==========
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -288,7 +282,7 @@ sets = db_load_sets(USER_ID)
 bw   = db_load_bw(USER_ID)
 
 # ← ここで正規化（必須）
-sets = _normalize_sets_df(sets)
+sets = normalize_sets_df(sets)
 
 # 部位が変わったらメニュー選択をリセットして先頭に合わせる
 def _on_bp_change():
@@ -539,7 +533,10 @@ bw   = db_load_bw(USER_ID)
 st.divider()
 st.subheader("当日のセット一覧（色付け & PR）")
 day = st.date_input("表示する日付", value=dt.date.today(), key="view_day")
-today_sets = sets[sets["date"] == day].copy()
+
+date_ser = pd.to_datetime(sets["date"], errors="coerce").dt.date
+today_sets = sets.loc[date_ser == day].copy()
+
 
 if today_sets.empty:
     st.info("この日付の記録はありません。上のフォームで追加してください。")
@@ -746,6 +743,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
