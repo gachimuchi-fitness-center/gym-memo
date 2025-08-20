@@ -13,7 +13,14 @@ import os, json, shutil
 import re, unicodedata
 
 def normalize_email(s: str) -> str:
-    s = unicodedata.normalize("NFKC", (s or "").strip())
+    # 前後空白を削り、全角→半角へ正規化（NFKC）
+    return unicodedata.normalize("NFKC", (s or "").strip())
+
+def sanitize_ascii_email(s: str) -> str:
+    # 正規化後、ASCII以外の文字を“全部”削る（メールはASCIIのみ許可なので安全）
+    s = normalize_email(s)
+    s = "".join(ch for ch in s if ch.isascii())
+    # うっかり入った囲み記号などを端から除去（任意）
     return s.strip("()（）<>『』「」")
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
@@ -139,20 +146,27 @@ with st.sidebar:
         with tab2:
             su_email_raw = st.text_input("Email（新規作成）", key="su_email")
             su_pwd       = st.text_input("Password", type="password", key="su_pwd")
+        
             if st.button("Create account", key="btn_signup"):
-                su_email = normalize_email(su_email_raw)
-                if not su_email.isascii():
-                    st.error("メールアドレスに全角文字が含まれています。半角で入力してください。")
-                    st.stop()
+                # 1) 非ASCIIを徹底排除
+                su_email = sanitize_ascii_email(su_email_raw)
+        
+                # 2) （一時デバッグ）実際に送る文字列を確認したいときは下を有効化
+                # st.caption(f"DEBUG: {repr(su_email)}")
+        
+                # 3) 形式チェック
                 if not EMAIL_RE.fullmatch(su_email):
                     st.error("メールアドレスの形式が正しくありません（例: name@example.com）。")
                     st.stop()
+        
                 try:
                     res = supabase.auth.sign_up({"email": su_email, "password": su_pwd})
                     if res.user:
-                        st.success("アカウント作成に成功。確認メールが有効な設定なら、受信メールのリンクを開いてください。")
+                        st.success("アカウント作成に成功。Confirm email がONならメールのリンクを開いてください。")
                 except Exception as e:
-                    st.error(f"サインアップ失敗: {getattr(e,'message',repr(e))}")
+                    # ライブラリの例外は message が無いことがあるので repr を併用
+                    st.error(f"サインアップ失敗: {getattr(e, 'message', repr(e))}")
+
 
     else:
         st.write(f"ユーザー: {user.email}")
@@ -673,5 +687,6 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
