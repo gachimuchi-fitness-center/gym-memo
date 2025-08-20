@@ -113,6 +113,7 @@ if _token:
 # ========== Auth UI ==========
 with st.sidebar:
     st.subheader("ログイン")
+    st.caption("test1")
 
     user = st.session_state.get("user")
     if user is None:
@@ -705,6 +706,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
