@@ -27,7 +27,11 @@ EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
 
 # ========== Page Config ==========
-st.set_page_config(page_title="筋トレメモ & 1RMトラッカー", layout="wide")
+st.set_page_config(
+    page_title="筋トレメモ & 1RMトラッカー",
+    layout="wide",
+    initial_sidebar_state="collapsed",  # ★モバイルで横幅が広く使える
+)
 
 # ========== Constants / Settings ==========
 DATA_DIR = "."
@@ -813,6 +817,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
