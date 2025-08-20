@@ -95,6 +95,25 @@ def y_domain(series, pad_ratio=0.05):
     pad = span * pad_ratio
     return [lo - pad, hi + pad]
 
+def to_naive_ts_series(s: pd.Series) -> pd.Series:
+    import pandas as pd
+    ser = pd.to_datetime(s, errors="coerce")
+    try:
+        ser = ser.dt.tz_localize(None)  # tz付きなら外す
+    except Exception:
+        pass
+    return ser
+
+def to_naive_ts(x):
+    import pandas as pd
+    ts = pd.to_datetime(x, errors="coerce")
+    try:
+        ts = ts.tz_localize(None)       # tz付きなら外す
+    except Exception:
+        pass
+    return ts
+
+
 def get_date_series(df: pd.DataFrame) -> pd.Series:
     import pandas as pd
     # DataFrame化
@@ -428,77 +447,100 @@ with colL:
 
         # ==== 前回のトレーニング記録（同メニュー／選択日より前で最新） ====
         if exercise:
-            # 左辺: DataFrame内の日付列を安全にTimestamp化（tzは外す）
+            # DataFrame側の日付列を安全に（tz無し）Timestamp化
             date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
             try:
                 date_ser = date_ser.dt.tz_localize(None)  # tz付きなら外す
             except Exception:
                 pass
-            
-            # 右辺: 比較対象の date も Timestamp に
+        
+            # 右辺（日付入力）もTimestamp化
             date_ts = pd.to_datetime(date, errors="coerce")
             try:
-                # 右辺がtz付きになるケースに備えて外す
                 date_ts = date_ts.tz_localize(None)
             except Exception:
                 pass
-
-            prev_mask = (sets["exercise"] == exercise) & (date_ser < date_ts)
-            
+        
+            ex_ser = sets.get("exercise")  # exercise列
+        
+            prev_mask = (ex_ser == exercise) & (date_ser < date_ts)
+        
             if not sets.empty and prev_mask.any():
-                prev_day = sets.loc[prev_mask, "date"].max()
-                prev_df = sets[(sets["exercise"] == exercise) & (sets["date"] == prev_day)].copy()
+                # 直近の日付（Timestamp）を拾う
+                prev_day_ts = date_ser[prev_mask].max()
+        
+                # その日の同メニューだけ抽出（date列はTimestampで比較）
+                sel_mask = (ex_ser == exercise) & (date_ser == prev_day_ts)
+                prev_df = sets.loc[sel_mask].copy()
+        
+                # 1RM計算（列名はweight_kg / reps前提）
                 prev_df["e1rm"] = prev_df.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
-                prev_df = (prev_df
-                        .sort_values("set_no")
-                        [["set_no","weight_kg","reps","e1rm","note"]]
-                        .rename(columns={
-                            "set_no":"セット", "weight_kg":"重量(kg)",
-                            "reps":"回数", "e1rm":"1RM(kg)", "note":"メモ"
-                        }))
+                prev_df = (
+                    prev_df.sort_values("set_no")
+                           [["set_no","weight_kg","reps","e1rm","note"]]
+                           .rename(columns={
+                               "set_no":"セット", "weight_kg":"重量(kg)",
+                               "reps":"回数", "e1rm":"1RM(kg)", "note":"メモ"
+                           })
+                )
                 prev_best = prev_df["1RM(kg)"].max()
-                st.markdown(f"**前回（{prev_day}）の記録**　セッション1RM: **{prev_best:.1f} kg**")
+                # 表示用に日付だけに整形
+                st.markdown(f"**前回（{prev_day_ts.date()}）の記録**　セッション1RM: **{prev_best:.1f} kg**")
                 st.dataframe(prev_df, hide_index=True, use_container_width=True)
             else:
                 st.caption("前回の記録：なし（このメニューは初回）")
-
-
-        # ==== 前回のトレーニング記録（同メニュー／選択日より前で最新） ====
-        prev_mask = (sets["exercise"] == exercise) & (sets["date"] < date)
-        if not sets.empty and prev_mask.any():
-            prev_day = sets.loc[prev_mask, "date"].max()
-            prev_df = sets[(sets["exercise"] == exercise) & (sets["date"] == prev_day)].copy()
-            prev_df["e1rm"] = prev_df.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
-            prev_df = (prev_df
-                    .sort_values("set_no")
-                    [["set_no","weight_kg","reps","e1rm","note"]]
-                    .rename(columns={
-                        "set_no":"セット","weight_kg":"重量(kg)",
-                        "reps":"回数","e1rm":"1RM(kg)","note":"メモ"
-                    }))
-            prev_best = prev_df["1RM(kg)"].max()
-            st.markdown(f"**前回（{prev_day}）の記録**　セッション1RM: **{prev_best:.1f} kg**")
-            st.dataframe(prev_df, hide_index=True, use_container_width=True)
-        else:
-            st.caption("前回の記録：なし（このメニューは初回）")
-
+        
+        
         # ==== 前回の“最後のセット”をデフォルト入力に反映 ====
         last_w, last_r = 0.0, 1
-        if not sets.empty and prev_mask.any():
-            _last = (sets[(sets["exercise"]==exercise) & (sets["date"]==prev_day)]
-                    .sort_values("set_no").tail(1))
-            if not _last.empty:
-                last_w = float(_last["weight_kg"].iloc[0] or 0.0)
-                last_r = int(_last["reps"].iloc[0] or 1)
-
+        if not sets.empty and exercise:
+            try:
+                # 上で計算した prev_mask / prev_day_ts を再利用するため、無い場合は再計算
+                if "prev_mask" not in locals():
+                    date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
+                    try:
+                        date_ser = date_ser.dt.tz_localize(None)
+                    except Exception:
+                        pass
+                    date_ts = pd.to_datetime(date, errors="coerce")
+                    try:
+                        date_ts = date_ts.tz_localize(None)
+                    except Exception:
+                        pass
+                    ex_ser = sets.get("exercise")
+                    prev_mask = (ex_ser == exercise) & (date_ser < date_ts)
+        
+                if prev_mask.any():
+                    prev_day_ts = date_ser[prev_mask].max()
+                    sel_mask = (sets["exercise"]==exercise) & (date_ser==prev_day_ts)
+                    _last = sets.loc[sel_mask].sort_values("set_no").tail(1)
+                    if not _last.empty:
+                        last_w = float(_last["weight_kg"].iloc[0] or 0.0)
+                        last_r = int(_last["reps"].iloc[0] or 1)
+            except Exception:
+                pass
+        
+        
         # ==== 同じ日×同じメニューの次セット番号を自動採番 ====
         try:
-            exist = sets[(sets["date"] == date) & (sets["exercise"] == exercise)]
-            cur_max = pd.to_numeric(exist["set_no"], errors="coerce").max()
+            date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
+            try:
+                date_ser = date_ser.dt.tz_localize(None)
+            except Exception:
+                pass
+            ex_ser = sets.get("exercise")
+            # 入力日の“日付だけ”で一致（例：時間が含まれていてもOK）
+            today_mask = (ex_ser == exercise) & (date_ser.dt.date == date)
+            exist = sets.loc[today_mask]
+            cur_max = pd.to_numeric(exist.get("set_no"), errors="coerce").max()
             next_set_no = int(cur_max) + 1 if pd.notna(cur_max) else 1
         except Exception:
             next_set_no = 1
+        
         st.caption(f"今回のセット番号: **{next_set_no}**（自動採番）")
+
+
+        
 
         # ==== 入力欄（前回の値をデフォルトにセット） ====
         weight = st.number_input("重量 (kg)", min_value=0.0, step=2.5, value=last_w, key="w_input")
@@ -771,6 +813,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
