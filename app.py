@@ -142,19 +142,18 @@ with st.sidebar:
                 except Exception as e:
                     st.error(f"サインイン失敗: {getattr(e,'message',repr(e))}")
 
-        # ---------- Sign up ----------
+        # ---- Sign up タブ ----
         with tab2:
             su_email_raw = st.text_input("Email（新規作成）", key="su_email")
             su_pwd       = st.text_input("Password", type="password", key="su_pwd")
         
             if st.button("Create account", key="btn_signup"):
-                # 1) 非ASCIIを徹底排除
+                # 非ASCIIを徹底排除 → 形式チェック
                 su_email = sanitize_ascii_email(su_email_raw)
         
-                # 2) （一時デバッグ）実際に送る文字列を確認したいときは下を有効化
-                # st.caption(f"DEBUG: {repr(su_email)}")
+                # デバッグ確認したい時は一時的に表示
+                # st.caption(f"DEBUG raw: {repr(su_email_raw)}  -> send: {repr(su_email)}")
         
-                # 3) 形式チェック
                 if not EMAIL_RE.fullmatch(su_email):
                     st.error("メールアドレスの形式が正しくありません（例: name@example.com）。")
                     st.stop()
@@ -164,8 +163,8 @@ with st.sidebar:
                     if res.user:
                         st.success("アカウント作成に成功。Confirm email がONならメールのリンクを開いてください。")
                 except Exception as e:
-                    # ライブラリの例外は message が無いことがあるので repr を併用
                     st.error(f"サインアップ失敗: {getattr(e, 'message', repr(e))}")
+
 
 
     else:
@@ -687,6 +686,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
