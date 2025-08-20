@@ -428,7 +428,23 @@ with colL:
 
         # ==== 前回のトレーニング記録（同メニュー／選択日より前で最新） ====
         if exercise:
-            prev_mask = (sets["exercise"] == exercise) & (sets["date"] < date)
+            # 左辺: DataFrame内の日付列を安全にTimestamp化（tzは外す）
+            date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
+            try:
+                date_ser = date_ser.dt.tz_localize(None)  # tz付きなら外す
+            except Exception:
+                pass
+            
+            # 右辺: 比較対象の date も Timestamp に
+            date_ts = pd.to_datetime(date, errors="coerce")
+            try:
+                # 右辺がtz付きになるケースに備えて外す
+                date_ts = date_ts.tz_localize(None)
+            except Exception:
+                pass
+
+            prev_mask = (sets["exercise"] == exercise) & (date_ser < date_ts)
+            
             if not sets.empty and prev_mask.any():
                 prev_day = sets.loc[prev_mask, "date"].max()
                 prev_df = sets[(sets["exercise"] == exercise) & (sets["date"] == prev_day)].copy()
@@ -755,6 +771,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
