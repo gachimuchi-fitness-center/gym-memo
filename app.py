@@ -10,6 +10,15 @@ import altair as alt
 import datetime as dt
 import os, json, shutil
 
+import re, unicodedata
+
+def normalize_email(s: str) -> str:
+    s = unicodedata.normalize("NFKC", (s or "").strip())
+    return s.strip("()（）<>『』「」")
+
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+
 # ========== Page Config ==========
 st.set_page_config(page_title="筋トレメモ & 1RMトラッカー", layout="wide")
 
@@ -103,22 +112,47 @@ with st.sidebar:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Sign in"):
+                li_email = normalize_email(li_email_raw)
                 try:
-                    auth = supabase.auth.sign_in_with_password({"email": email, "password": pwd})
-                    st.session_state["user"] = auth.user
-                    st.session_state["access_token"] = auth.session.access_token
-                    supabase.postgrest.auth(auth.session.access_token)
-                    st.success("ログインしました")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"ログイン失敗: {e}")
+                    li_email.encode("ascii")  # 全角が混ざっていたらここで検出
+                except UnicodeEncodeError:
+                    st.error("メールアドレスに全角が含まれています。半角で入力してください。")
+                    st.stop()
+                if not EMAIL_RE.match(li_email):
+                    st.error("メール形式が正しくありません（例: name@example.com）。")
+                    st.stop()
+            
+                auth = supabase.auth.sign_in_with_password({"email": li_email, "password": li_pwd})
+                st.session_state["user"] = auth.user
+                st.session_state["access_token"] = auth.session.access_token
+                supabase.postgrest.auth(auth.session.access_token)
+                st.success("ログインしました")
+                st.rerun()
+
+                
         with c2:
-            if st.button("Sign up"):
+            su_email_raw = st.text_input("Email（新規作成）", key="su_email")
+            su_pwd       = st.text_input("Password", type="password", key="su_pwd")
+        
+            if st.button("Create account"):
+                # 全角対策＋簡易バリデーション
+                su_email = normalize_email(su_email_raw)
                 try:
-                    supabase.auth.sign_up({"email": email, "password": pwd})
-                    st.success("サインアップ完了。Sign in を押してください。")
+                    su_email.encode("ascii")  # 全角が混ざっていればここで検出
+                except UnicodeEncodeError:
+                    st.error("メールアドレスに全角文字が含まれています。半角で入力してください。")
+                    st.stop()
+        
+                if not EMAIL_RE.match(su_email):
+                    st.error("メールアドレスの形式が正しくありません（例: name@example.com）。")
+                    st.stop()
+        
+                try:
+                    res = supabase.auth.sign_up({"email": su_email, "password": su_pwd})
+                    if res.user:
+                        st.success("アカウント作成に成功。確認メールが有効な設定なら、受信メールのリンクを開いてください。")
                 except Exception as e:
-                    st.error(f"サインアップ失敗: {e}")
+                    st.error(f"サインアップ失敗: {getattr(e, 'message', str(e))}")
     else:
         st.write(f"ユーザー: {st.session_state['user'].email}")
         if st.button("Sign out"):
@@ -636,3 +670,4 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
