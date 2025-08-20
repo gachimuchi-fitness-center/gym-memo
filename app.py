@@ -95,6 +95,17 @@ def y_domain(series, pad_ratio=0.05):
     pad = span * pad_ratio
     return [lo - pad, hi + pad]
 
+def get_date_series(df: pd.DataFrame) -> pd.Series:
+    import pandas as pd
+    # DataFrame化
+    df = df if isinstance(df, pd.DataFrame) else pd.DataFrame(df or [])
+    # 使えそうな日付列を優先順で探す
+    for c in ("date", "created_at", "performed_at", "timestamp"):
+        if c in df.columns:
+            return pd.to_datetime(df[c], errors="coerce")
+    # どれも無ければ NaT の列を返す
+    return pd.Series(pd.NaT, index=df.index, dtype="datetime64[ns]")
+
 
 
 def normalize_sets_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -532,9 +543,10 @@ bw   = db_load_bw(USER_ID)
 # 当日のセット一覧（色付け & PR）
 st.divider()
 st.subheader("当日のセット一覧（色付け & PR）")
+
 day = st.date_input("表示する日付", value=dt.date.today(), key="view_day")
 
-date_ser = pd.to_datetime(sets["date"], errors="coerce").dt.date
+date_ser = get_date_series(sets).dt.date   # ← 安全に日付列を取得
 today_sets = sets.loc[date_ser == day].copy()
 
 
@@ -743,6 +755,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
