@@ -106,66 +106,69 @@ if _token:
 # ========== Auth UI ==========
 with st.sidebar:
     st.subheader("ログイン")
-    if st.session_state["user"] is None:
-        email = st.text_input("Email")
-        pwd   = st.text_input("Password", type="password")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Sign in"):
-                li_email = normalize_email(li_email_raw)
-                try:
-                    li_email.encode("ascii")  # 全角が混ざっていたらここで検出
-                except UnicodeEncodeError:
-                    st.error("メールアドレスに全角が含まれています。半角で入力してください。")
-                    st.stop()
-                if not EMAIL_RE.match(li_email):
-                    st.error("メール形式が正しくありません（例: name@example.com）。")
-                    st.stop()
-            
-                auth = supabase.auth.sign_in_with_password({"email": li_email, "password": li_pwd})
-                st.session_state["user"] = auth.user
-                st.session_state["access_token"] = auth.session.access_token
-                supabase.postgrest.auth(auth.session.access_token)
-                st.success("ログインしました")
-                st.rerun()
 
-                
-        with c2:
-            su_email_raw = st.text_input("Email（新規作成）", key="su_email")
-            su_pwd       = st.text_input("Password", type="password", key="su_pwd")
-        
-            if st.button("Create account"):
-                # 全角対策＋簡易バリデーション
-                su_email = normalize_email(su_email_raw)
-                try:
-                    su_email.encode("ascii")  # 全角が混ざっていればここで検出
-                except UnicodeEncodeError:
+    user = st.session_state.get("user")
+    if user is None:
+        tab1, tab2 = st.tabs(["Sign in", "Sign up"])
+
+        # ---------- Sign in ----------
+        with tab1:
+            li_email_raw = st.text_input("Email", key="li_email")
+            li_pwd       = st.text_input("Password", type="password", key="li_pwd")
+            if st.button("Sign in", key="btn_signin"):
+                li_email = normalize_email(li_email_raw)
+                if not li_email.isascii():
                     st.error("メールアドレスに全角文字が含まれています。半角で入力してください。")
                     st.stop()
-        
-                if not EMAIL_RE.match(su_email):
+                if not EMAIL_RE.fullmatch(li_email):
+                    st.error("メール形式が正しくありません（例: name@example.com）。")
+                    st.stop()
+                try:
+                    auth = supabase.auth.sign_in_with_password(
+                        {"email": li_email, "password": li_pwd}
+                    )
+                    st.session_state["user"] = auth.user
+                    st.session_state["access_token"] = auth.session.access_token
+                    supabase.postgrest.auth(auth.session.access_token)
+                    st.success("ログインしました")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"サインイン失敗: {getattr(e,'message',repr(e))}")
+
+        # ---------- Sign up ----------
+        with tab2:
+            su_email_raw = st.text_input("Email（新規作成）", key="su_email")
+            su_pwd       = st.text_input("Password", type="password", key="su_pwd")
+            if st.button("Create account", key="btn_signup"):
+                su_email = normalize_email(su_email_raw)
+                if not su_email.isascii():
+                    st.error("メールアドレスに全角文字が含まれています。半角で入力してください。")
+                    st.stop()
+                if not EMAIL_RE.fullmatch(su_email):
                     st.error("メールアドレスの形式が正しくありません（例: name@example.com）。")
                     st.stop()
-        
                 try:
                     res = supabase.auth.sign_up({"email": su_email, "password": su_pwd})
                     if res.user:
                         st.success("アカウント作成に成功。確認メールが有効な設定なら、受信メールのリンクを開いてください。")
                 except Exception as e:
-                    st.error(f"サインアップ失敗: {getattr(e, 'message', str(e))}")
+                    st.error(f"サインアップ失敗: {getattr(e,'message',repr(e))}")
+
     else:
-        st.write(f"ユーザー: {st.session_state['user'].email}")
-        if st.button("Sign out"):
+        st.write(f"ユーザー: {user.email}")
+        if st.button("Sign out", key="btn_signout"):
             supabase.auth.sign_out()
+            supabase.postgrest.auth(None)
             st.session_state["user"] = None
             st.session_state["access_token"] = None
             st.rerun()
 
-# 未ログインならここで止める
-if st.session_state["user"] is None:
+# 未ログインならここで止める（以降の画面を隠す）
+if st.session_state.get("user") is None:
     st.stop()
 
-USER_ID = st.session_state["user"].id  # 以降のDB I/Oで使う
+USER_ID = st.session_state["user"].id
+
 
 # ========== DB I/O ==========
 def _iso(v):
@@ -670,4 +673,5 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
