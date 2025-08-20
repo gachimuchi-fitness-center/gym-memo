@@ -487,6 +487,9 @@ with colL:
                                "reps":"回数", "e1rm":"1RM(kg)", "note":"メモ"
                            })
                 )
+
+                # ★ 種目列を先頭に追加
+                prev_df.insert(0, "種目", exercise)
                 prev_best = prev_df["1RM(kg)"].max()
                 # 表示用に日付だけに整形
                 st.markdown(f"**前回（{prev_day_ts.date()}）の記録**　セッション1RM: **{prev_best:.1f} kg**")
@@ -817,6 +820,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
