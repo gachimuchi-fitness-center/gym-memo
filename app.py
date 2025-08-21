@@ -300,24 +300,34 @@ def _iso(v):
         return v.isoformat()
     return v
 
-def db_load_sets(user_id):
-    res = supabase.table("workouts").select("*").eq("user_id", user_id).order("date").execute()
+from postgrest import APIError
+
+def db_load_sets(user_id: str) -> pd.DataFrame:
+    try:
+        # sets テーブルに user_id を持たせている前提
+        res = (
+            supabase.table("sets")
+            .select("id, exercise, bodypart, weight_kg, reps, set_no, note, date, ts, user_id")
+            .eq("user_id", user_id)
+            .order("date")
+            .order("set_no")
+            .execute()
+        )
+    except APIError as e:
+        # 何が起きているか画面に短く出す（詳細はManage app→Logsでも確認可能）
+        st.error(
+            "DB読み込みエラー（sets）: "
+            f"{getattr(e, 'message', str(e))} / {getattr(e, 'details', '')} / {getattr(e, 'hint', '')}"
+        )
+        raise
+
     df = pd.DataFrame(res.data)
-    if df.empty: return df
-    # 型整備
-    df["date"] = pd.to_datetime(df["date"]).dt.date
-    if "ts" in df.columns: df["ts"] = pd.to_datetime(df["ts"], errors="coerce")
-    for c in ["set_no", "reps"]:
-        if c in df.columns: df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
-    if "weight_kg" in df.columns: df["weight_kg"] = pd.to_numeric(df["weight_kg"], errors="coerce")
-    df["note"] = df.get("note", "").astype(str).fillna("")
-    # 1RM列
-    df["e1rm"] = df.apply(lambda r: est_1rm_epley(r.get("weight_kg"), r.get("reps")), axis=1)
-    return df
+    return normalize_sets_df(df)  # ← 既存の正規化関数で列を整える
+
 
 def db_insert_set(user_id, row: dict):
-    clean = {k: _iso(v) for k, v in row.items()}
-    supabase.table("workouts").insert({**clean, "user_id": user_id}).execute()
+    row = {**row, "user_id": user_id}   # ★ 必ず付ける
+    supabase.table("sets").insert(row).execute()
 
 def db_load_bw(user_id):
     res = supabase.table("bodyweight").select("*").eq("user_id", user_id).order("date").execute()
@@ -787,6 +797,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
