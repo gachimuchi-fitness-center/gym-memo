@@ -129,38 +129,45 @@ def get_date_series(df: pd.DataFrame) -> pd.Series:
     # どれも無ければ NaT の列を返す
     return pd.Series(pd.NaT, index=df.index, dtype="datetime64[ns]")
 
-
-
 def normalize_sets_df(df: pd.DataFrame) -> pd.DataFrame:
     import pandas as pd
 
     df = pd.DataFrame(df).copy() if not isinstance(df, pd.DataFrame) else df.copy()
 
-    # 空でも必要カラムを用意
     if df.empty:
         return pd.DataFrame(
-            columns=["id","workout_id","exercise","weight","reps","is_pr","date"]
+            columns=["id","workout_id","exercise","weight_kg","reps","is_pr","date","set_no","note","bodypart","day"]  # ★
         )
 
     # 別名 → 想定名へ
     ren = {}
     if "name" in df.columns and "exercise" not in df.columns:
         ren["name"] = "exercise"
+    if "weight" in df.columns and "weight_kg" not in df.columns:   # ★ weight→weight_kg を吸収
+        ren["weight"] = "weight_kg"
     for c in ("date", "created_at", "performed_at", "timestamp"):
         if c in df.columns and "date" not in df.columns:
-            ren[c] = "date"
-            break
+            ren[c] = "date"; break
     if ren:
         df = df.rename(columns=ren)
 
-    # 無い列は空で補完
-    for c in ("id","workout_id","exercise","weight","reps","is_pr","date"):
+    # 無い列は空で補完（よく使う列を網羅）
+    for c in ("id","workout_id","exercise","weight_kg","reps","is_pr","date","set_no","note","bodypart"):  # ★
         if c not in df.columns:
             df[c] = pd.NA
 
-    # 日付をdatetimeへ
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    # 日付→Timestamp化（tzは外す）
+    ds = pd.to_datetime(df["date"], errors="coerce")
+    try:
+        ds = ds.dt.tz_localize(None)                                 # ★ tz付きなら外す
+    except Exception:
+        pass
+    df["date"] = ds
+    df["day"]  = ds.dt.normalize()                                   # ★ 日付だけ（00:00）に揃えた列を追加
+
     return df
+
+
 
 # ========== Supabase Client ==========
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -675,7 +682,9 @@ else:
         )
 
         line = alt.Chart(base).mark_line(point=True).encode(
-            x=alt.X("date:T", title="日付"),
+            x=alt.X("day:T", timeUnit="yearmonthdate",
+                    axis=alt.Axis(format="%m/%d", labelAngle=0),
+                    scale=alt.Scale(nice="day")),
             y=y_enc,  # ← ここを差し替え
             color=alt.Color("exercise:N", title="メニュー")
         )
@@ -770,6 +779,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
