@@ -449,9 +449,14 @@ with colL:
     except Exception: pass
     
     ex_ser = sets.get("exercise")
+    
+    # 1) 今日の同メニューの記録（当日の最新を優先したいので先に作る）
+    today_mask = (ex_ser == ex_sel) & (date_ser.dt.date == date)
+    today_df   = sets.loc[today_mask].copy()
+    
+    # 2) 「前回セッション」（選択日より前で最新）を表示するためのデータ
     prev_mask = (ex_ser == ex_sel) & (date_ser < date_ts)
     
-    last_w, last_r = 0.0, 1
     if ex_sel and not sets.empty and prev_mask.any():
         prev_day_ts = date_ser[prev_mask].max()
         sel_mask = (ex_ser == ex_sel) & (date_ser == prev_day_ts)
@@ -460,10 +465,7 @@ with colL:
         prev_df["e1rm"] = prev_df.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
         prev_df = (prev_df.sort_values("set_no")
                           [["set_no","weight_kg","reps","e1rm","note"]]
-                          .rename(columns={
-                              "set_no":"セット","重量(kg)":"重量(kg)" if "重量(kg)" in prev_df.columns else "weight_kg",
-                              "reps":"回数","e1rm":"1RM(kg)","note":"メモ"}))
-        # 列名調整
+                          .rename(columns={"set_no":"セット","reps":"回数","e1rm":"1RM(kg)","note":"メモ"}))
         if "weight_kg" in prev_df.columns:
             prev_df = prev_df.rename(columns={"weight_kg":"重量(kg)"})
         prev_df.insert(0, "種目", ex_sel)
@@ -471,20 +473,27 @@ with colL:
         prev_best = prev_df["1RM(kg)"].max()
         st.markdown(f"**前回（{prev_day_ts.date()}）の記録**　セッション1RM: **{prev_best:.1f} kg**")
         st.dataframe(prev_df, hide_index=True, use_container_width=True)
-    
-        _last = sets.loc[sel_mask].sort_values("set_no").tail(1)
-        if not _last.empty:
-            last_w = float(_last["weight_kg"].iloc[0] or 0.0)
-            last_r = int(_last["reps"].iloc[0] or 1)
     else:
         st.caption("前回の記録：なし（このメニューは初回）")
     
-    # 同日×同メニューの次セット番号（フォーム内で使用）
-    today_mask = (ex_ser == ex_sel) & (date_ser.dt.date == date)
-    exist = sets.loc[today_mask] if (ex_sel and not sets.empty) else pd.DataFrame()
+    # 3) 次セット番号（当日の既存セット数から）
+    exist = today_df
     cur_max = pd.to_numeric(exist.get("set_no"), errors="coerce").max() if not exist.empty else pd.NA
     next_set_no = int(cur_max) + 1 if pd.notna(cur_max) else 1
     st.caption(f"今回のセット番号: **{next_set_no}**（自動採番）")
+    
+    # 4) 入力デフォ値（優先順：今日の最新 → 前回の最後 → 0/1）
+    last_w, last_r = 0.0, 1
+    if not today_df.empty:
+        _tlast = today_df.sort_values("set_no").tail(1)
+        last_w = float(pd.to_numeric(_tlast["weight_kg"], errors="coerce").iloc[0] or 0.0)
+        last_r = int(pd.to_numeric(_tlast["reps"], errors="coerce").iloc[0] or 1)
+    elif ex_sel and not sets.empty and prev_mask.any():
+        prev_day_ts = date_ser[prev_mask].max()
+        _plast = sets.loc[(ex_ser == ex_sel) & (date_ser == prev_day_ts)].sort_values("set_no").tail(1)
+        if not _plast.empty:
+            last_w = float(pd.to_numeric(_plast["weight_kg"], errors="coerce").iloc[0] or 0.0)
+            last_r = int(pd.to_numeric(_plast["reps"], errors="coerce").iloc[0] or 1)
     
     # --- フォーム内：送信で確定する値だけ ---
     with st.form("add_set", clear_on_submit=True):
@@ -521,6 +530,7 @@ with colL:
     
             st.success("セットを追加しました。")
             st.rerun()
+
     
     # 右カラム：体重の記録（消えていたらこれを挿入）
     with colR:
@@ -760,6 +770,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
