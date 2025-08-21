@@ -131,41 +131,40 @@ def get_date_series(df: pd.DataFrame) -> pd.Series:
 
 def normalize_sets_df(df: pd.DataFrame) -> pd.DataFrame:
     import pandas as pd
+    df = df if isinstance(df, pd.DataFrame) else pd.DataFrame(df or [])
+    df = df.copy()
 
-    df = pd.DataFrame(df).copy() if not isinstance(df, pd.DataFrame) else df.copy()
-
+    # 空でも必要カラムを用意（workouts準拠）
     if df.empty:
         return pd.DataFrame(
-            columns=["id","workout_id","exercise","weight_kg","reps","is_pr","date","set_no","note","bodypart","day"]  # ★
+            columns=["id","user_id","date","exercise","bodypart","set_no",
+                     "weight_kg","reps","note","ts","day"]
         )
 
-    # 別名 → 想定名へ
+    # 旧カラム名の吸収（もし過去データで weight 等があれば）
     ren = {}
-    if "name" in df.columns and "exercise" not in df.columns:
-        ren["name"] = "exercise"
-    if "weight" in df.columns and "weight_kg" not in df.columns:   # ★ weight→weight_kg を吸収
+    if "weight" in df.columns and "weight_kg" not in df.columns:
         ren["weight"] = "weight_kg"
-    for c in ("date", "created_at", "performed_at", "timestamp"):
-        if c in df.columns and "date" not in df.columns:
-            ren[c] = "date"; break
     if ren:
         df = df.rename(columns=ren)
 
-    # 無い列は空で補完（よく使う列を網羅）
-    for c in ("id","workout_id","exercise","weight_kg","reps","is_pr","date","set_no","note","bodypart"):  # ★
+    # 無い列は空で補完
+    for c in ("id","user_id","date","exercise","bodypart","set_no",
+              "weight_kg","reps","note","ts"):
         if c not in df.columns:
             df[c] = pd.NA
 
-    # 日付→Timestamp化（tzは外す）
+    # 日付をTimestamp化し、tzを外して day を作成
     ds = pd.to_datetime(df["date"], errors="coerce")
     try:
-        ds = ds.dt.tz_localize(None)                                 # ★ tz付きなら外す
+        ds = ds.dt.tz_localize(None)
     except Exception:
         pass
     df["date"] = ds
-    df["day"]  = ds.dt.normalize()                                   # ★ 日付だけ（00:00）に揃えた列を追加
+    df["day"]  = ds.dt.normalize()
 
     return df
+
 
 
 
@@ -304,30 +303,26 @@ from postgrest import APIError
 
 def db_load_sets(user_id: str) -> pd.DataFrame:
     try:
-        # sets テーブルに user_id を持たせている前提
         res = (
-            supabase.table("sets")
-            .select("id, exercise, bodypart, weight_kg, reps, set_no, note, date, ts, user_id")
+            supabase.table("workouts")
+            .select("id, user_id, date, exercise, bodypart, set_no, weight_kg, reps, note, ts")
             .eq("user_id", user_id)
             .order("date")
             .order("set_no")
             .execute()
         )
     except APIError as e:
-        # 何が起きているか画面に短く出す（詳細はManage app→Logsでも確認可能）
         st.error(
-            "DB読み込みエラー（sets）: "
-            f"{getattr(e, 'message', str(e))} / {getattr(e, 'details', '')} / {getattr(e, 'hint', '')}"
+            "DB読み込みエラー（workouts）: "
+            f"{getattr(e,'message',str(e))} / {getattr(e,'details','')} / {getattr(e,'hint','')}"
         )
         raise
 
-    df = pd.DataFrame(res.data)
-    return normalize_sets_df(df)  # ← 既存の正規化関数で列を整える
+    return normalize_sets_df(pd.DataFrame(res.data))
 
-
-def db_insert_set(user_id, row: dict):
-    row = {**row, "user_id": user_id}   # ★ 必ず付ける
-    supabase.table("sets").insert(row).execute()
+def db_insert_set(user_id: str, row: dict):
+    row = {**row, "user_id": user_id}   # RLSで必須
+    supabase.table("workouts").insert(row).execute()
 
 def db_load_bw(user_id):
     res = supabase.table("bodyweight").select("*").eq("user_id", user_id).order("date").execute()
@@ -797,6 +792,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
