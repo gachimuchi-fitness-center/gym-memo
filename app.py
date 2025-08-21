@@ -584,43 +584,49 @@ st.subheader("当日のセット一覧（色付け & PR）")
 
 day = st.session_state["selected_date"]
 
-date_ser = pd.to_datetime(sets.get("date"), errors="coerce").dt.tz_localize(None)   # ← 安全に日付列を取得
-today_sets = sets.loc[date_ser == day].copy()
+# 日付列を安全に取得（tzは外す）
+date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
+try:
+    date_ser = date_ser.dt.tz_localize(None)
+except Exception:
+    pass
 
+# 当日のレコードだけ
+today_sets = sets.loc[date_ser.dt.date == day].copy()
 
 if today_sets.empty:
     st.info("この日付の記録はありません。上のフォームで追加してください。")
 else:
     today_sets["e1rm"] = today_sets.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
-    history = sets[sets["date"] < day].copy()
+
+    # 過去（選択日より前）
+    day_ts = pd.to_datetime(day, errors="coerce")
+    history = sets.loc[date_ser < day_ts].copy()
     if not history.empty:
         history["e1rm"] = history.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
-    best_hist = (history.dropna(subset=["e1rm"])
-                        .sort_values(["exercise","e1rm"], ascending=[True, False])
-                        .groupby("exercise", as_index=True)
-                        .first()[["e1rm"]]
-                        .rename(columns={"e1rm":"hist_best"}))
+
+    best_hist = (
+        history.dropna(subset=["e1rm"])
+               .sort_values(["exercise","e1rm"], ascending=[True, False])
+               .groupby("exercise", as_index=True)
+               .first()[["e1rm"]]
+               .rename(columns={"e1rm":"hist_best"})
+    )
 
     for ex in sorted(today_sets["exercise"].unique()):
         ex_df = today_sets[today_sets["exercise"] == ex].sort_values("set_no")
-
-        # 当日の最大1RM（セッション1RM）
         max_e1rm = ex_df["e1rm"].max()
         st.markdown(f"### {ex}（当日セッション1RM: **{max_e1rm:.1f} kg**）")
 
-        # 過去最高
         hist_best_val = best_hist.loc[ex, "hist_best"] if ex in best_hist.index else None
-        # 当日がPR更新日か？（当日の最大で判定）
         is_pr_day = (hist_best_val is None) or (max_e1rm > (hist_best_val + EPS))
-        # 当日の最大セットを1つに限定（同値が複数でも最初の1つ）
         best_idx = ex_df["e1rm"].idxmax()
 
         for idx, row in ex_df.iterrows():
             e1 = row["e1rm"]
             is_session_best = (idx == best_idx)
             color = "red" if is_session_best else "black"
-            show_pr = is_session_best and is_pr_day  # 最大セットかつPR更新日のみ
-
+            show_pr = is_session_best and is_pr_day
             pr_badge = " 🏆 **PR更新**" if show_pr else ""
             st.markdown(
                 f"- セット{int(row['set_no'])}: {row['weight_kg']} kg × {int(row['reps'])} rep "
@@ -629,48 +635,6 @@ else:
                 unsafe_allow_html=True
             )
 
-# 日内：セットごとの1RM推移
-st.divider()
-st.subheader("日内：セットごとの1RM推移（休憩目安）")
-if today_sets.empty:
-    st.info("この日付の記録はありません。")
-else:
-    day_exercises = sorted(today_sets["exercise"].unique().tolist())
-    sel_ex = st.multiselect("対象メニューを選択", options=day_exercises,
-                            default=day_exercises[:1] if day_exercises else [])
-    if not sel_ex:
-        st.info("メニューを選んでください。")
-    else:
-        view = today_sets[today_sets["exercise"].isin(sel_ex)].copy()
-        # 記録時刻から休憩推定
-        if "ts" in view.columns and view["ts"].notna().any():
-            view = view.sort_values(["exercise", "ts", "set_no"])
-            view["rest_min"] = (view.groupby("exercise")["ts"].diff().dt.total_seconds() / 60).round(1)
-        else:
-            view = view.sort_values(["exercise", "set_no"])
-
-        dom_e1 = y_domain(view["e1rm"])
-        y_enc = alt.Y(
-            "e1rm:Q", title="1RM (kg)",
-            scale=alt.Scale(domain=dom_e1, zero=False, nice=False)
-        )
-
-        chart = alt.Chart(view).mark_line(point=True).encode(
-            x=alt.X("set_no:Q", title="セット番号", axis=alt.Axis(format="d", tickMinStep=1)),
-            y=y_enc,  # ← ここを差し替え
-            color=alt.Color("exercise:N", title="メニュー"),
-            tooltip=[
-                alt.Tooltip("exercise:N", title="メニュー"),
-                alt.Tooltip("set_no:Q",   title="セット", format=".0f"),
-                alt.Tooltip("weight_kg:Q",title="重量(kg)"),
-                alt.Tooltip("reps:Q",     title="回数"),
-                alt.Tooltip("e1rm:Q",     title="1RM(kg)", format=".1f"),
-            ] + ([alt.Tooltip("rest_min:Q", title="休憩(分)", format=".1f")]
-                if "rest_min" in view.columns else [])
-        )
-        st.altair_chart(chart, use_container_width=True)
-        if "rest_min" in view.columns:
-            st.caption("※ 休憩時間は各セットの記録時刻の差分から推定（目安）。")
 
 # メニュー別：セッション最大1RM 推移
 st.divider()
@@ -793,6 +757,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
