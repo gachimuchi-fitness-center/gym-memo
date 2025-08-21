@@ -321,8 +321,35 @@ def db_load_sets(user_id: str) -> pd.DataFrame:
     return normalize_sets_df(pd.DataFrame(res.data))
 
 def db_insert_set(user_id: str, row: dict):
-    row = {**row, "user_id": user_id}   # RLSで必須
-    supabase.table("workouts").insert(row).execute()
+    import datetime as dt
+    clean = dict(row)  # 破壊しないようコピー
+
+    # 必須: user_id を付与
+    clean["user_id"] = user_id
+
+    # date(date型) → 'YYYY-MM-DD'
+    d = clean.get("date")
+    if isinstance(d, dt.date) and not isinstance(d, dt.datetime):
+        clean["date"] = d.isoformat()
+
+    # ts(datetime型) → ISO（tz必須）
+    ts = clean.get("ts")
+    if isinstance(ts, dt.datetime):
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=dt.timezone.utc)
+        clean["ts"] = ts.isoformat()
+
+    # 数値は素直な型に
+    if "weight_kg" in clean and clean["weight_kg"] is not None:
+        clean["weight_kg"] = float(clean["weight_kg"])
+    if "reps" in clean and clean["reps"] is not None:
+        clean["reps"] = int(clean["reps"])
+    if "set_no" in clean and clean["set_no"] is not None:
+        clean["set_no"] = int(clean["set_no"])
+
+    # 挿入
+    supabase.table("workouts").insert(clean).execute()
+
 
 def db_load_bw(user_id):
     res = supabase.table("bodyweight").select("*").eq("user_id", user_id).order("date").execute()
@@ -332,9 +359,13 @@ def db_load_bw(user_id):
     df["bodyweight_kg"] = pd.to_numeric(df["bodyweight_kg"], errors="coerce")
     return df
 
-def db_insert_bw(user_id, row: dict):
-    clean = {k: _iso(v) for k, v in row.items()}
-    supabase.table("bodyweight").insert({**clean, "user_id": user_id}).execute()
+def db_insert_bw(user_id: str, date_obj, bw_kg):
+    supabase.table("bodyweight").insert({
+        "user_id": user_id,
+        "date": date_obj.isoformat(),     # ← ここ
+        "bodyweight_kg": float(bw_kg),
+    }).execute()
+
 
 # ========== Initial Load ==========
 ex_master = load_ex_master()
@@ -792,6 +823,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
