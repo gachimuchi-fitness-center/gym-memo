@@ -682,9 +682,7 @@ else:
         )
 
         line = alt.Chart(base).mark_line(point=True).encode(
-            x=alt.X("day:T", timeUnit="yearmonthdate",
-                    axis=alt.Axis(format="%m/%d", labelAngle=0),
-                    scale=alt.Scale(nice="day")),
+            x=alt.X("date:T", title="日付"),
             y=y_enc,  # ← ここを差し替え
             color=alt.Color("exercise:N", title="メニュー")
         )
