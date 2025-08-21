@@ -272,6 +272,20 @@ with st.sidebar:
 if st.session_state.get("user") is None:
     st.stop()
 
+# === Global date selector (Single Source of Truth) ===
+if "selected_date" not in st.session_state:
+    st.session_state["selected_date"] = dt.date.today()
+
+# 置き場所は好きな方でOK（どちらか1つ）
+# A) メインカラム上部
+st.subheader("📅 表示日")
+st.date_input("日付を選択", key="selected_date")  # ← これ1箇所だけ
+
+# B) サイドバーに置きたい場合
+# with st.sidebar:
+#     st.date_input("日付を選択", key="selected_date")
+
+
 USER_ID = st.session_state["user"].id
 
 
@@ -433,7 +447,7 @@ with colL:
     st.subheader("セットの追加（メモ）")
 
     # --- フォーム外：変更時に即リランされる ---
-    date = st.date_input("日付", value=dt.date.today(), key="set_date")
+    date = st.session_state["selected_date"]
     
     # 部位選択（部位を変えるとメニュー候補も即更新）
     bp = st.selectbox("部位", options=list(ex_master.keys()), key="bp_main")
@@ -450,6 +464,8 @@ with colL:
     date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
     try: date_ser = date_ser.dt.tz_localize(None)
     except Exception: pass
+
+    sel_date = st.session_state["selected_date"]
     
     date_ts = pd.to_datetime(date, errors="coerce")
     try: date_ts = date_ts.tz_localize(None)
@@ -458,8 +474,8 @@ with colL:
     ex_ser = sets.get("exercise")
     
     # 1) 今日の同メニューの記録（当日の最新を優先したいので先に作る）
-    today_mask = (ex_ser == ex_sel) & (date_ser.dt.date == date)
-    today_df   = sets.loc[today_mask].copy()
+    today_mask = (sets.get("exercise") == ex_sel) & (date_ser.dt.date == sel_date)
+    today_df   = sets.loc[today_mask]
     
     # 2) 「前回セッション」（選択日より前で最新）を表示するためのデータ
     prev_mask = (ex_ser == ex_sel) & (date_ser < date_ts)
@@ -543,7 +559,7 @@ with colL:
     with colR:
         st.subheader("体重の記録")
         with st.form("add_bw", clear_on_submit=True):
-            bw_date = st.date_input("日付（体重）", value=dt.date.today(), key="bw_date")
+            bw_date = st.session_state["selected_date"]
             bw_val  = st.number_input("体重 (kg)", min_value=0.0, step=0.1, value=0.0, key="bw_val")
             bw_sub  = st.form_submit_button("体重を記録")
             if bw_sub:
@@ -566,9 +582,9 @@ bw   = db_load_bw(USER_ID)
 st.divider()
 st.subheader("当日のセット一覧（色付け & PR）")
 
-day = st.date_input("表示する日付", value=dt.date.today(), key="view_day")
+day = st.session_state["selected_date"]
 
-date_ser = get_date_series(sets).dt.date   # ← 安全に日付列を取得
+date_ser = pd.to_datetime(sets.get("date"), errors="coerce").dt.tz_localize(None)   # ← 安全に日付列を取得
 today_sets = sets.loc[date_ser == day].copy()
 
 
@@ -777,6 +793,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
