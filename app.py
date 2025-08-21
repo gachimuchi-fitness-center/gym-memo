@@ -456,9 +456,9 @@ with colL:
     # メニュー（既存）をフォームの外に移動（変更→即リラン）
     if ex_opts:
         ex_sel = st.selectbox("メニュー（既存）", options=ex_opts, key=f"ex_sel_{bp}_outer")
+        st.session_state["selected_exercise"] = ex_sel    # ← これ！
     else:
-        ex_sel = ""
-        st.info("この部位にはまだメニューがありません。下のフォームで新規追加してください。")
+        st.session_state["selected_exercise"] = ""        # 候補が無いときは空に
     
     # ===== 前回の記録（選択メニュー × 選択日より前の最新）を即時表示 =====
     date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
@@ -582,7 +582,8 @@ bw   = db_load_bw(USER_ID)
 st.divider()
 st.subheader("当日のセット一覧（色付け & PR）")
 
-day = st.session_state["selected_date"]
+day    = st.session_state["selected_date"]
+sel_ex = st.session_state.get("selected_exercise")
 
 # 日付列を安全に取得（tzは外す）
 date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
@@ -591,12 +592,40 @@ try:
 except Exception:
     pass
 
-# 当日のレコードだけ
+# 当日のレコード（全メニュー）
 today_sets = sets.loc[date_ser.dt.date == day].copy()
+
+# ===== その日の“選択メニュー”のセットごとの1RM推移（あれば） =====
+if sel_ex:
+    ex_today = today_sets.loc[today_sets["exercise"] == sel_ex].copy()
+    if not ex_today.empty:
+        ex_today["e1rm"] = ex_today.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
+        ex_today = ex_today.sort_values("set_no")
+
+        import altair as alt
+        chart = (
+            alt.Chart(ex_today)
+               .mark_line(point=True)
+               .encode(
+                   x=alt.X("set_no:Q", title="セット番号"),
+                   y=alt.Y("e1rm:Q", title="推定1RM (kg)", scale=alt.Scale(zero=False)),
+                   tooltip=[
+                       alt.Tooltip("set_no:Q",   title="セット"),
+                       alt.Tooltip("weight_kg:Q", title="重量(kg)", format=".1f"),
+                       alt.Tooltip("reps:Q",      title="回数"),
+                       alt.Tooltip("e1rm:Q",      title="推定1RM", format=".1f"),
+                   ],
+               )
+        )
+        st.markdown(f"### {sel_ex} のセットごとの1RM推移（{day.strftime('%Y-%m-%d')}）")
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        st.caption(f"{sel_ex} の記録はこの日にありません。")
 
 if today_sets.empty:
     st.info("この日付の記録はありません。上のフォームで追加してください。")
 else:
+    # 以降は従来の「当日のセット一覧（全メニュー）」とPR判定
     today_sets["e1rm"] = today_sets.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
 
     # 過去（選択日より前）
@@ -634,6 +663,7 @@ else:
                 f"｜ メモ: {row['note']}",
                 unsafe_allow_html=True
             )
+
 
 
 # メニュー別：セッション最大1RM 推移
@@ -757,6 +787,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
