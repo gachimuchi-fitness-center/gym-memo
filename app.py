@@ -425,147 +425,88 @@ colL, colR = st.columns([1,1])
 with colL:
     st.subheader("セットの追加（メモ）")
 
-    # --- フォーム外：ここは変更時に即リランされる ---
+    # --- フォーム外：変更時に即リランされる ---
     date = st.date_input("日付", value=dt.date.today(), key="set_date")
-
-    # 部位を外に出す → 変えた瞬間にメニュー候補が更新される
-    bp   = st.selectbox("部位", options=list(ex_master.keys()), key="bp_main")
-
-    # この部位の候補だけ取得
+    
+    # 部位選択（部位を変えるとメニュー候補も即更新）
+    bp = st.selectbox("部位", options=list(ex_master.keys()), key="bp_main")
     ex_opts = ex_master.get(bp, [])
-
-    # --- フォーム内：送信ボタンで確定する値だけ ---
+    
+    # メニュー（既存）をフォームの外に移動（変更→即リラン）
+    if ex_opts:
+        ex_sel = st.selectbox("メニュー（既存）", options=ex_opts, key=f"ex_sel_{bp}_outer")
+    else:
+        ex_sel = ""
+        st.info("この部位にはまだメニューがありません。下のフォームで新規追加してください。")
+    
+    # ===== 前回の記録（選択メニュー × 選択日より前の最新）を即時表示 =====
+    date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
+    try: date_ser = date_ser.dt.tz_localize(None)
+    except Exception: pass
+    
+    date_ts = pd.to_datetime(date, errors="coerce")
+    try: date_ts = date_ts.tz_localize(None)
+    except Exception: pass
+    
+    ex_ser = sets.get("exercise")
+    prev_mask = (ex_ser == ex_sel) & (date_ser < date_ts)
+    
+    last_w, last_r = 0.0, 1
+    if ex_sel and not sets.empty and prev_mask.any():
+        prev_day_ts = date_ser[prev_mask].max()
+        sel_mask = (ex_ser == ex_sel) & (date_ser == prev_day_ts)
+        prev_df = sets.loc[sel_mask].copy()
+    
+        prev_df["e1rm"] = prev_df.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
+        prev_df = (prev_df.sort_values("set_no")
+                          [["set_no","weight_kg","reps","e1rm","note"]]
+                          .rename(columns={
+                              "set_no":"セット","重量(kg)":"重量(kg)" if "重量(kg)" in prev_df.columns else "weight_kg",
+                              "reps":"回数","e1rm":"1RM(kg)","note":"メモ"}))
+        # 列名調整
+        if "weight_kg" in prev_df.columns:
+            prev_df = prev_df.rename(columns={"weight_kg":"重量(kg)"})
+        prev_df.insert(0, "種目", ex_sel)
+    
+        prev_best = prev_df["1RM(kg)"].max()
+        st.markdown(f"**前回（{prev_day_ts.date()}）の記録**　セッション1RM: **{prev_best:.1f} kg**")
+        st.dataframe(prev_df, hide_index=True, use_container_width=True)
+    
+        _last = sets.loc[sel_mask].sort_values("set_no").tail(1)
+        if not _last.empty:
+            last_w = float(_last["weight_kg"].iloc[0] or 0.0)
+            last_r = int(_last["reps"].iloc[0] or 1)
+    else:
+        st.caption("前回の記録：なし（このメニューは初回）")
+    
+    # 同日×同メニューの次セット番号（フォーム内で使用）
+    today_mask = (ex_ser == ex_sel) & (date_ser.dt.date == date)
+    exist = sets.loc[today_mask] if (ex_sel and not sets.empty) else pd.DataFrame()
+    cur_max = pd.to_numeric(exist.get("set_no"), errors="coerce").max() if not exist.empty else pd.NA
+    next_set_no = int(cur_max) + 1 if pd.notna(cur_max) else 1
+    st.caption(f"今回のセット番号: **{next_set_no}**（自動採番）")
+    
+    # --- フォーム内：送信で確定する値だけ ---
     with st.form("add_set", clear_on_submit=True):
-        # 部位が変わると key が変わるので旧状態に引っ張られない
-        ex_sel = st.selectbox(
-            "メニュー（既存）",
-            options=ex_opts if ex_opts else [],
-            key=f"ex_sel_{bp}"
-        )
-        ex_new = st.text_input(
-            "新規メニュー名（この部位に追加）",
-            value="",
-            key=f"ex_new_{bp}"
-        )
-        exercise = ex_new.strip() if ex_new.strip() else ex_sel
-
-        # ==== 前回のトレーニング記録（同メニュー／選択日より前で最新） ====
-        if exercise:
-            # DataFrame側の日付列を安全に（tz無し）Timestamp化
-            date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
-            try:
-                date_ser = date_ser.dt.tz_localize(None)  # tz付きなら外す
-            except Exception:
-                pass
-        
-            # 右辺（日付入力）もTimestamp化
-            date_ts = pd.to_datetime(date, errors="coerce")
-            try:
-                date_ts = date_ts.tz_localize(None)
-            except Exception:
-                pass
-        
-            ex_ser = sets.get("exercise")  # exercise列
-        
-            prev_mask = (ex_ser == exercise) & (date_ser < date_ts)
-        
-            if not sets.empty and prev_mask.any():
-                # 直近の日付（Timestamp）を拾う
-                prev_day_ts = date_ser[prev_mask].max()
-        
-                # その日の同メニューだけ抽出（date列はTimestampで比較）
-                sel_mask = (ex_ser == exercise) & (date_ser == prev_day_ts)
-                prev_df = sets.loc[sel_mask].copy()
-        
-                # 1RM計算（列名はweight_kg / reps前提）
-                prev_df["e1rm"] = prev_df.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
-                prev_df = (
-                    prev_df.sort_values("set_no")
-                           [["set_no","weight_kg","reps","e1rm","note"]]
-                           .rename(columns={
-                               "set_no":"セット", "weight_kg":"重量(kg)",
-                               "reps":"回数", "e1rm":"1RM(kg)", "note":"メモ"
-                           })
-                )
-
-                # ★ 種目列を先頭に追加
-                prev_df.insert(0, "種目", exercise)
-                prev_best = prev_df["1RM(kg)"].max()
-                # 表示用に日付だけに整形
-                st.markdown(f"**前回（{prev_day_ts.date()}）の記録**　セッション1RM: **{prev_best:.1f} kg**")
-                st.dataframe(prev_df, hide_index=True, use_container_width=True)
-            else:
-                st.caption("前回の記録：なし（このメニューは初回）")
-        
-        
-        # ==== 前回の“最後のセット”をデフォルト入力に反映 ====
-        last_w, last_r = 0.0, 1
-        if not sets.empty and exercise:
-            try:
-                # 上で計算した prev_mask / prev_day_ts を再利用するため、無い場合は再計算
-                if "prev_mask" not in locals():
-                    date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
-                    try:
-                        date_ser = date_ser.dt.tz_localize(None)
-                    except Exception:
-                        pass
-                    date_ts = pd.to_datetime(date, errors="coerce")
-                    try:
-                        date_ts = date_ts.tz_localize(None)
-                    except Exception:
-                        pass
-                    ex_ser = sets.get("exercise")
-                    prev_mask = (ex_ser == exercise) & (date_ser < date_ts)
-        
-                if prev_mask.any():
-                    prev_day_ts = date_ser[prev_mask].max()
-                    sel_mask = (sets["exercise"]==exercise) & (date_ser==prev_day_ts)
-                    _last = sets.loc[sel_mask].sort_values("set_no").tail(1)
-                    if not _last.empty:
-                        last_w = float(_last["weight_kg"].iloc[0] or 0.0)
-                        last_r = int(_last["reps"].iloc[0] or 1)
-            except Exception:
-                pass
-        
-        
-        # ==== 同じ日×同じメニューの次セット番号を自動採番 ====
-        try:
-            date_ser = pd.to_datetime(sets.get("date"), errors="coerce")
-            try:
-                date_ser = date_ser.dt.tz_localize(None)
-            except Exception:
-                pass
-            ex_ser = sets.get("exercise")
-            # 入力日の“日付だけ”で一致（例：時間が含まれていてもOK）
-            today_mask = (ex_ser == exercise) & (date_ser.dt.date == date)
-            exist = sets.loc[today_mask]
-            cur_max = pd.to_numeric(exist.get("set_no"), errors="coerce").max()
-            next_set_no = int(cur_max) + 1 if pd.notna(cur_max) else 1
-        except Exception:
-            next_set_no = 1
-        
-        st.caption(f"今回のセット番号: **{next_set_no}**（自動採番）")
-
-
-        
-
-        # ==== 入力欄（前回の値をデフォルトにセット） ====
+        st.caption(f"選択中の既存メニュー: {ex_sel or '（未選択）'}")
+        ex_new = st.text_input("新規メニュー名（この部位に追加）", value="", key=f"ex_new_{bp}")
+        exercise = ex_new.strip() or ex_sel
+    
         weight = st.number_input("重量 (kg)", min_value=0.0, step=2.5, value=last_w, key="w_input")
         reps   = st.number_input("回数 (rep)", min_value=1, step=1,   value=last_r, key="r_input")
         note   = st.text_input("感想・メモ（任意）", key="note_input")
-
-
+    
         submitted = st.form_submit_button("追加")
         if submitted:
             row = {
-                "date": date,  # db_insert_setでISO化
+                "date": date,
                 "exercise": exercise,
                 "bodypart": bp,
                 "set_no": int(next_set_no),
                 "weight_kg": float(weight),
                 "reps": int(reps),
                 "note": note,
-                "ts": dt.datetime.now(dt.timezone.utc)
+                "ts": dt.datetime.now(dt.timezone.utc),
             }
             try:
                 db_insert_set(USER_ID, row)
@@ -573,31 +514,30 @@ with colL:
                 st.error(f"DBエラー: {getattr(e, 'message', e)}"); st.stop()
             except Exception as e:
                 st.error(f"想定外のエラー: {e}"); st.stop()
-
-            # 新規メニューはマスターにも追加
+    
             if ex_new.strip():
                 ex_master[bp] = _dedup_keep_order(ex_master.get(bp, []) + [exercise])
                 save_ex_master(ex_master)
-
+    
             st.success("セットを追加しました。")
             st.rerun()
-
-# 右カラム：体重の記録（消えていたらこれを挿入）
-with colR:
-    st.subheader("体重の記録")
-    with st.form("add_bw", clear_on_submit=True):
-        bw_date = st.date_input("日付（体重）", value=dt.date.today(), key="bw_date")
-        bw_val  = st.number_input("体重 (kg)", min_value=0.0, step=0.1, value=0.0, key="bw_val")
-        bw_sub  = st.form_submit_button("体重を記録")
-        if bw_sub:
-            try:
-                db_insert_bw(USER_ID, {"date": bw_date, "bodyweight_kg": float(bw_val)})
-            except APIError as e:
-                st.error(f"DBエラー: {getattr(e, 'message', e)}"); st.stop()
-            except Exception as e:
-                st.error(f"想定外のエラー: {e}"); st.stop()
-            st.success("体重を記録しました。")
-            st.rerun()
+    
+    # 右カラム：体重の記録（消えていたらこれを挿入）
+    with colR:
+        st.subheader("体重の記録")
+        with st.form("add_bw", clear_on_submit=True):
+            bw_date = st.date_input("日付（体重）", value=dt.date.today(), key="bw_date")
+            bw_val  = st.number_input("体重 (kg)", min_value=0.0, step=0.1, value=0.0, key="bw_val")
+            bw_sub  = st.form_submit_button("体重を記録")
+            if bw_sub:
+                try:
+                    db_insert_bw(USER_ID, {"date": bw_date, "bodyweight_kg": float(bw_val)})
+                except APIError as e:
+                    st.error(f"DBエラー: {getattr(e, 'message', e)}"); st.stop()
+                except Exception as e:
+                    st.error(f"想定外のエラー: {e}"); st.stop()
+                st.success("体重を記録しました。")
+                st.rerun()
 
 
 # ---- 最新データを再ロード（DBから） ----
@@ -820,6 +760,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
