@@ -638,14 +638,15 @@ if sel_ex:
         ex_today["e1rm"] = ex_today.apply(lambda r: est_1rm_epley(r["weight_kg"], r["reps"]), axis=1)
         ex_today = ex_today.sort_values("set_no")
 
+        ex_today["set_no"] = pd.to_numeric(ex_today["set_no"], errors="coerce").fillna(0).astype(int)
+        tick_vals = sorted(ex_today["set_no"].unique().tolist())
+
         import altair as alt
         chart = (
             alt.Chart(ex_today)
                .mark_line(point=True)
                .encode(
-                   x=alt.X("set_no:Q", title="セット番号",
-                            axis=alt.Axis(values=tick_vals, format="d"),
-                            scale=alt.Scale(nice=False)),
+                   x=alt.X("set_no:O", title="セット番号", sort=tick_vals),
                    y=alt.Y("e1rm:Q", title="推定1RM (kg)", scale=alt.Scale(zero=False)),
                    tooltip=[
                        alt.Tooltip("set_no:Q",   title="セット"),
@@ -825,6 +826,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
