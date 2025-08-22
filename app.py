@@ -643,7 +643,9 @@ if sel_ex:
             alt.Chart(ex_today)
                .mark_line(point=True)
                .encode(
-                   x=alt.X("set_no:Q", title="セット番号"),
+                   x=alt.X("set_no:Q", title="セット番号",
+                            axis=alt.Axis(values=tick_vals, format="d"),
+                            scale=alt.Scale(nice=False)),
                    y=alt.Y("e1rm:Q", title="推定1RM (kg)", scale=alt.Scale(zero=False)),
                    tooltip=[
                        alt.Tooltip("set_no:Q",   title="セット"),
@@ -823,6 +825,7 @@ else:
             st.altair_chart(chart, use_container_width=True)
 
 st.caption("v1.1 DB版：ユーザーごとに完全分離（Supabase Auth + RLS）。入力→DB保存→再描画まで統一。")
+
 
 
 
